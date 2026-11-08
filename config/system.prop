@@ -1,0 +1,6 @@
+# Tambahkan property dengan format KEY=VALUE.
+# Hapus tanda komentar untuk mengaktifkannya.
+#
+# Contoh format:
+# ro.example.optimizer.enabled=true
+# persist.example.optimizer.mode=1
