@@ -1,87 +1,39 @@
 #!/system/bin/sh
-# Skrip zRAM (Khusus RAM 2GB)
-
-#!/system/bin/sh
-
-# 1. Tunggu boot
-until [ "$(getprop sys.boot_completed)" = "1" ]; do
-    sleep 10
+# XSANZZ OS - A03 Core conservative memory profile
+# Never reset/reformat zRAM after Android has activated swap.
+LOG_FILE="/data/adb/xsanzz-tuning.log"
+log_msg() { echo "$(date '+%F %T' 2>/dev/null) [memory] $1" >> "$LOG_FILE"; }
+count=0
+while [ "$(getprop sys.boot_completed)" != "1" ] && [ "$count" -lt 90 ]; do
+  sleep 2
+  count=$((count + 1))
 done
-
-# 2 & 3. Reset zRAM 
-swapoff /dev/block/zram0
-
-echo 1 > /sys/block/zram0/reset
-
-echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null
-
-# Daftar ukuran zRAM (bytes)
-
-# 128MB  = 134217728
-# 256MB  = 268435456
-# 512MB  = 536870912
-# 768MB  = 805306368 
-# 1GB       = 1073741824
-# 1.5GB    = 1610612736
-# 1.8GB    = 1932735283
-# 2GGB    = 2147483648
-# 2.5GB    = 2684354560
-# 4GB       = 4294967296
-
-echo 1073741824 > /sys/block/zram0/disksize
-
-mkswap /dev/block/zram0
-swapon /dev/block/zram0
-
-# 4. Terapkan Tweaks VM & Pendukung ZRAM
-echo 170 > /proc/sys/vm/swappiness
-echo 20 > /proc/sys/vm/dirty_ratio
-echo 5 > /proc/sys/vm/dirty_background_ratio
-echo 100 > /proc/sys/vm/vfs_cache_pressure
-echo "75" > /sys/module/vmpressure/parameters/allocstall_threshold
-echo "65" > /sys/module/zram/parameters/zram_balance_ratio
-echo 80 > /sys/kernel/mm/vmscan/direct_swappiness
-
-# PLUS+
-setprop persist.vendor.eng.jeita 0
-setprop persist.sys.thermal.ipa 0
-setprop persist.sys.ss.scroll true
-setprop persist.sys.pq.enabled 0
-setprop debug.hwui.renderer skiaglthreaded
-setprop debug.renderengine.backend skiaglthreaded
-
-for policy in /sys/devices/system/cpu/cpufreq/policy0 /sys/devices/system/cpu/cpufreq/policy4; do
-    if [ -d "$policy" ]; then
-        echo schedXsn > "$policy/scaling_governor" 2>/dev/null
+if [ "$(getprop sys.boot_completed)" != "1" ]; then
+  log_msg "Boot completion timeout; memory settings unchanged."
+  exit 0
+fi
+# The stock A03 audit recorded swappiness=170, 1 GiB zRAM and LZ4.
+# Only align swappiness; keep init/vendor in charge of zRAM lifecycle.
+SWAPPINESS="/proc/sys/vm/swappiness"
+if [ -r "$SWAPPINESS" ] && [ -w "$SWAPPINESS" ]; then
+  current="$(cat "$SWAPPINESS" 2>/dev/null)"
+  if [ "$current" != "170" ]; then
+    if echo 170 > "$SWAPPINESS" 2>/dev/null; then
+      log_msg "Swappiness changed from $current to 170."
+    else
+      log_msg "Could not change swappiness; current=$current."
     fi
-done
-
-for block in /sys/block/mmcblk0 /sys/block/dm-*; do
-    if [ -d "$block/queue" ]; then
-        echo 0 > "$block/queue/iostats" 2>/dev/null
-        echo 128 > "$block/queue/nr_requests" 2>/dev/null
-        echo 2 > "$block/queue/rq_affinity" 2>/dev/null
-    fi
-done
-
-PARAM_DIR="/sys/module/process_reclaim/parameters"
-
-for param in \
-    "enable_process_reclaim:1" \
-    "min_score_adj:500" \
-    "per_swap_size:1024" \
-    "pressure_max:100" \
-    "pressure_min:50" \
-    "swap_eff_win:2" \
-    "swap_high_ratio:100" \
-    "swap_low_ratio:50" \
-    "swap_opt_eff:55"
-do
-    name="${param%%:*}"
-    value="${param#*:}"
-    file="$PARAM_DIR/$name"
-
-    if [ -f "$file" ] && [ -w "$file" ]; then
-        printf '%s\n' "$value" > "$file" 2>/dev/null
-    fi
-done
+  else
+    log_msg "Swappiness already matches stock audit (170)."
+  fi
+else
+  log_msg "Swappiness node unavailable; left unchanged."
+fi
+if [ -r /sys/block/zram0/disksize ]; then
+  log_msg "Existing zRAM size: $(cat /sys/block/zram0/disksize) bytes."
+fi
+if [ -r /sys/block/zram0/comp_algorithm ]; then
+  log_msg "Existing zRAM algorithms: $(cat /sys/block/zram0/comp_algorithm)."
+fi
+# No swapoff/reset, thermal/JEITA changes, CPU/GPU forcing, or block-queue overrides.
+exit 0

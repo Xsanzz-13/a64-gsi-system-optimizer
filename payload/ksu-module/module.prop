@@ -1,0 +1,6 @@
+id=xsanzz_a03_stock_tuning
+name=XSANZZ A03 Stock-Aligned Tuning
+version=1.0
+versionCode=1
+author=Xsannz
+description=Conservative A03 Core memory profile and mild HWC startup adjustment; preserves vendor zRAM and thermal controls.

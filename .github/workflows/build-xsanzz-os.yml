@@ -1,0 +1,233 @@
+name: Build XSANZZ OS
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_version:
+        description: "XSANZZ OS release version"
+        required: true
+        default: "1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout XSANZZ OS optimizer
+        uses: actions/checkout@v4
+
+      - name: Prepare build tools and workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs xz-utils zip unzip
+          mkdir -p "$RUNNER_TEMP/xsanzz/extracted" "$RUNNER_TEMP/xsanzz/apks"
+          {
+            echo "XSANZZ OS version: ${{ inputs.build_version }}"
+            date -u
+            nproc
+            free -h
+            df -h /
+          } | tee "$GITHUB_WORKSPACE/build-report.txt"
+
+      - name: Download and verify supplied Brevent and ZArchiver Pro APKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK_TAG="xsanzz-apk-input-${{ inputs.build_version }}"
+          APK_DIR="$RUNNER_TEMP/xsanzz/apks"
+          gh release download "$APK_TAG" \
+            --repo Xsanzz-13/a64-gsi-system-optimizer \
+            --pattern XSANZZ_APK_EXPORT_LITE.zip \
+            --dir "$APK_DIR"
+          APK_ARCHIVE="$APK_DIR/XSANZZ_APK_EXPORT_LITE.zip"
+          test -s "$APK_ARCHIVE"
+          unzip -t "$APK_ARCHIVE"
+          mkdir -p "$APK_DIR/unpacked"
+          unzip -q "$APK_ARCHIVE" 'Brevent/base.apk' 'ZArchiver/base.apk' -d "$APK_DIR/unpacked"
+          test -s "$APK_DIR/unpacked/Brevent/base.apk"
+          test -s "$APK_DIR/unpacked/ZArchiver/base.apk"
+          echo "BREVENT_APK=$APK_DIR/unpacked/Brevent/base.apk" >> "$GITHUB_ENV"
+          echo "ZARCHIVER_APK=$APK_DIR/unpacked/ZArchiver/base.apk" >> "$GITHUB_ENV"
+          {
+            echo "===== EMBEDDED APK INPUTS ====="
+            sha256sum "$APK_DIR/unpacked/Brevent/base.apk" "$APK_DIR/unpacked/ZArchiver/base.apk"
+            ls -lh "$APK_DIR/unpacked/Brevent/base.apk" "$APK_DIR/unpacked/ZArchiver/base.apk"
+          } | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+
+      - name: Download and verify A64 GSI base
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET_API="https://api.github.com/repos/Lost-Entrepreneur439/LineageOS-a64_gsi/releases/assets/452705009"
+          ARCHIVE="$RUNNER_TEMP/xsanzz/base-gsi.tar.xz"
+          mkdir -p "$(dirname "$ARCHIVE")"
+          curl -fL --show-error \
+            --retry 8 --retry-all-errors --retry-delay 10 --retry-max-time 900 \
+            --connect-timeout 45 \
+            -H "Accept: application/octet-stream" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$ASSET_API" -o "$ARCHIVE"
+          test "$(stat -c %s "$ARCHIVE")" -eq 739635436
+          echo "b942b856f7aa72d2f881c933a936a4bc9c438520fad43eebdd4287addc6f2889  $ARCHIVE" | sha256sum -c -
+          echo "Base archive verified." | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+
+      - name: Extract and identify system image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xJf "$RUNNER_TEMP/xsanzz/base-gsi.tar.xz" -C "$RUNNER_TEMP/xsanzz/extracted"
+          IMAGE_FILE="$(find "$RUNNER_TEMP/xsanzz/extracted" -type f -iname '*.img' -print -quit)"
+          test -n "$IMAGE_FILE"
+          FS_TYPE="$(blkid -p -s TYPE -o value "$IMAGE_FILE" || true)"
+          test "$FS_TYPE" = "ext4"
+          echo "IMAGE_FILE=$IMAGE_FILE" >> "$GITHUB_ENV"
+          echo "SYSTEM_ROOT=$RUNNER_TEMP/xsanzz/system-root" >> "$GITHUB_ENV"
+          echo "Detected image: $IMAGE_FILE ($FS_TYPE)" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+          ls -lh "$IMAGE_FILE" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+
+      - name: Apply XSANZZ profile, branding, and bundled apps
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$SYSTEM_ROOT"
+          sudo mount -t ext4 -o loop,rw,nosuid,nodev,noexec "$IMAGE_FILE" "$SYSTEM_ROOT"
+          mountpoint -q "$SYSTEM_ROOT"
+          test -f "$SYSTEM_ROOT/system/build.prop"
+          test -f "$SYSTEM_ROOT/system/product/etc/build.prop"
+          bash scripts/modify_system.sh "$SYSTEM_ROOT" "$GITHUB_WORKSPACE/config"
+
+          # Install as regular system apps (not privileged apps).
+          sudo install -D -o root -g root -m 0644 "$BREVENT_APK" \
+            "$SYSTEM_ROOT/system/app/Brevent/Brevent.apk"
+          sudo install -D -o root -g root -m 0644 "$ZARCHIVER_APK" \
+            "$SYSTEM_ROOT/system/app/ZArchiverPro/ZArchiverPro.apk"
+          test -s "$SYSTEM_ROOT/system/app/Brevent/Brevent.apk"
+          test -s "$SYSTEM_ROOT/system/app/ZArchiverPro/ZArchiverPro.apk"
+          cmp -s "$BREVENT_APK" "$SYSTEM_ROOT/system/app/Brevent/Brevent.apk"
+          cmp -s "$ZARCHIVER_APK" "$SYSTEM_ROOT/system/app/ZArchiverPro/ZArchiverPro.apk"
+          echo "Brevent and ZArchiver Pro embedded in /system/app (byte-for-byte verified)." | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+
+          echo "===== FINAL PROFILE VALIDATION =====" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+          grep -E '^(ro.config.low_ram|ro.lmk.critical_upgrade|ro.lmk.upgrade_pressure|ro.lmk.downgrade_pressure|ro.lmk.kill_heaviest_task|ro.lmk.use_minfree_levels|ro.lmk.psi_complete_stall_ms|ro.lmk.swap_free_low_percentage|pm.dexopt.shared|ro.build.display.id)=' "$SYSTEM_ROOT/system/build.prop" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+          grep -E '^(ro.build.display.id|ro.lineage.display.version)=' "$SYSTEM_ROOT/system/product/etc/build.prop" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+          if grep -E 'ro\.gsi\.optimizer\.v2_test|persist\.gsi\.optimizer\.test' "$SYSTEM_ROOT/system/build.prop" "$SYSTEM_ROOT/system/product/etc/build.prop"; then
+            echo "ERROR: temporary test properties remain."
+            exit 1
+          fi
+          sync
+
+      - name: Unmount and validate EXT4 image
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${SYSTEM_ROOT:-}" ] && mountpoint -q "$SYSTEM_ROOT"; then
+            sudo sync
+            sudo umount "$SYSTEM_ROOT"
+          fi
+          if [ -f "${IMAGE_FILE:-}" ]; then
+            sudo e2fsck -fn "$IMAGE_FILE" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+          fi
+
+      - name: Package XSANZZ KernelSU module and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.build_version }}"
+          MODULE_ROOT="$RUNNER_TEMP/xsanzz/ksu-module"
+          mkdir -p "$MODULE_ROOT/scripts"
+          cp payload/ksu-module/module.prop "$MODULE_ROOT/module.prop"
+          cp payload/ksu-module/service.sh "$MODULE_ROOT/service.sh"
+          cp payload/bin/auto.sh "$MODULE_ROOT/scripts/auto.sh"
+          cp payload/bin/refactor.sh "$MODULE_ROOT/scripts/refactor.sh"
+          chmod 0644 "$MODULE_ROOT/module.prop"
+          chmod 0755 "$MODULE_ROOT/service.sh" "$MODULE_ROOT/scripts/"*.sh
+          (cd "$MODULE_ROOT" && zip -X -qr "$GITHUB_WORKSPACE/XSANZZ-KSU-Tuning-$VERSION.zip" .)
+          unzip -t "$GITHUB_WORKSPACE/XSANZZ-KSU-Tuning-$VERSION.zip"
+          cp "$IMAGE_FILE" "$GITHUB_WORKSPACE/XSANZZ-OS-$VERSION-a64-bvN.img"
+          chmod 0644 "$GITHUB_WORKSPACE/XSANZZ-OS-$VERSION-a64-bvN.img"
+
+          cat > "$GITHUB_WORKSPACE/INSTALL.txt" <<'EOF'
+          XSANZZ OS - first test image
+          ============================
+          Base: LineageOS 23.2 / Android 16 / A64 (ARM32 userspace, Binder64) / EXT4.
+          Device target: Samsung Galaxy A03 Core (SM-A032F / Unisoc SC9863A).
+          Preinstalled system apps: Brevent and ZArchiver Pro.
+          Chrome is not included.
+
+          Image: XSANZZ-OS-<version>-a64-bvN.img
+          Optional KernelSU / SukiSU module: XSANZZ-KSU-Tuning-<version>.zip
+
+          Install the system image with the recovery/GSI method used for this device.
+          Install the tuning ZIP separately through KernelSU/SukiSU Manager after first boot.
+
+          Brevent still requires its normal USB/Wireless debugging activation after boot.
+          The module leaves zRAM lifecycle, charging, JEITA/thermal controls, and CPU/GPU frequencies to the existing system.
+
+          No GApps package is embedded in this image.
+          EOF
+
+          cat > "$GITHUB_WORKSPACE/GAPPS-STATUS.txt" <<'EOF'
+          No GApps package is embedded in this build.
+          Brevent and ZArchiver Pro are already embedded as system apps.
+          EOF
+
+          cat > "$GITHUB_WORKSPACE/APPS-INFO.txt" <<'EOF'
+          Preinstalled in /system/app:
+          - Brevent — me.piebridge.brevent
+          - ZArchiver Pro — ru.zdevs.zarchiver.pro
+
+          Chrome — com.android.chrome — intentionally not included.
+          Brevent requires normal debugging authorization after first boot.
+          EOF
+
+          {
+            echo
+            echo "===== OUTPUTS ====="
+            ls -lh "$GITHUB_WORKSPACE/XSANZZ-OS-$VERSION-a64-bvN.img" "$GITHUB_WORKSPACE/XSANZZ-KSU-Tuning-$VERSION.zip"
+            echo
+            echo "===== IMAGE FILESYSTEM ====="
+            file "$GITHUB_WORKSPACE/XSANZZ-OS-$VERSION-a64-bvN.img"
+            echo
+            echo "===== FREE SPACE ====="
+            df -h /
+          } | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+
+          sha256sum \
+            "$GITHUB_WORKSPACE/XSANZZ-OS-$VERSION-a64-bvN.img" \
+            "$GITHUB_WORKSPACE/XSANZZ-KSU-Tuning-$VERSION.zip" \
+            > "$GITHUB_WORKSPACE/SHA256SUMS.txt"
+
+      - name: Upload XSANZZ OS build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: XSANZZ-OS-${{ inputs.build_version }}-first-test
+          path: |
+            XSANZZ-OS-${{ inputs.build_version }}-a64-bvN.img
+            XSANZZ-KSU-Tuning-${{ inputs.build_version }}.zip
+            INSTALL.txt
+            GAPPS-STATUS.txt
+            APPS-INFO.txt
+            SHA256SUMS.txt
+            build-report.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Remove temporary APK input asset
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          APK_TAG="xsanzz-apk-input-${{ inputs.build_version }}"
+          gh release delete "$APK_TAG" --repo Xsanzz-13/a64-gsi-system-optimizer --cleanup-tag --yes
+          echo "Temporary APK input release cleanup attempted."

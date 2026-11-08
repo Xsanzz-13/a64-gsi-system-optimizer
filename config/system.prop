@@ -1,3 +1,13 @@
-# Temporary test for GSI optimizer
-ro.gsi.optimizer.v2_test=true
-persist.gsi.optimizer.test=1
+# XSANZZ OS 1.0 - Samsung Galaxy A03 Core
+# Values mapped from the stock A03 audit and adapted for Android 16.
+# Keep the Android 16 ART heap baseline; do not copy Android 13 heap limits.
+ro.config.low_ram=true
+ro.lmk.critical_upgrade=true
+ro.lmk.upgrade_pressure=30
+ro.lmk.downgrade_pressure=60
+ro.lmk.kill_heaviest_task=false
+ro.lmk.use_minfree_levels=false
+ro.lmk.psi_complete_stall_ms=400
+ro.lmk.swap_free_low_percentage=20
+pm.dexopt.shared=quicken
+ro.build.display.id=XSANZZ OS 1.0 | Port and modified by Xsannz
