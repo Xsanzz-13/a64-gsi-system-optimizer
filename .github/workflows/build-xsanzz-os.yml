@@ -218,7 +218,7 @@ jobs:
             SHA256SUMS.txt
             build-report.txt
           if-no-files-found: error
-          compression-level: 0
+          compression-level: 9
           retention-days: 14
 
       - name: Remove temporary APK input asset
