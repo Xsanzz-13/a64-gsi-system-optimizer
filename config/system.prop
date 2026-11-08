@@ -1,6 +1,3 @@
-# Tambahkan property dengan format KEY=VALUE.
-# Hapus tanda komentar untuk mengaktifkannya.
-#
-# Contoh format:
-# ro.example.optimizer.enabled=true
-# persist.example.optimizer.mode=1
+# Temporary test for GSI optimizer
+ro.gsi.optimizer.v2_test=true
+persist.gsi.optimizer.test=1
