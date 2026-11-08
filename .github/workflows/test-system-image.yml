@@ -1,0 +1,129 @@
+name: GSI Download and Extract Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      archive_url:
+        description: "GSI release archive URL"
+        required: true
+        type: string
+        default: "https://github.com/Lost-Entrepreneur439/LineageOS-a64_gsi/releases/download/2026-06-20/lineage-23.2-20260620-a64-bvN.tar.xz"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Prepare workspace
+        run: |
+          mkdir -p "$RUNNER_TEMP/gsi-optimizer/extracted"
+
+          echo "WORK_DIR=$RUNNER_TEMP/gsi-optimizer" >> "$GITHUB_ENV"
+          echo "REPORT=$GITHUB_WORKSPACE/gsi-report.txt" >> "$GITHUB_ENV"
+
+          {
+            echo "===== RUNNER INFORMATION ====="
+            date -u
+            uname -a
+            echo
+            echo "===== CPU ====="
+            nproc
+            echo
+            echo "===== MEMORY ====="
+            free -h
+            echo
+            echo "===== DISK BEFORE DOWNLOAD ====="
+            df -h /
+          } | tee "$GITHUB_WORKSPACE/gsi-report.txt"
+
+      - name: Download GSI archive
+        env:
+          ARCHIVE_URL: ${{ inputs.archive_url }}
+        run: |
+          set -euo pipefail
+
+          echo "===== DOWNLOADING GSI ====="
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 5 \
+            --connect-timeout 30 \
+            "$ARCHIVE_URL" \
+            -o "$WORK_DIR/gsi.tar.xz"
+
+          {
+            echo
+            echo "===== ARCHIVE INFORMATION ====="
+            ls -lh "$WORK_DIR/gsi.tar.xz"
+            stat "$WORK_DIR/gsi.tar.xz"
+            sha256sum "$WORK_DIR/gsi.tar.xz"
+            echo
+            echo "===== DISK AFTER DOWNLOAD ====="
+            df -h /
+          } | tee -a "$REPORT"
+
+      - name: Extract GSI archive
+        run: |
+          set -euo pipefail
+
+          echo "===== EXTRACTING ARCHIVE ====="
+
+          tar -xJf "$WORK_DIR/gsi.tar.xz" \
+            -C "$WORK_DIR/extracted"
+
+          {
+            echo
+            echo "===== EXTRACTED FILES ====="
+            find "$WORK_DIR/extracted" -type f \
+              -printf '%s bytes | %p\n' | sort -nr
+
+            echo
+            echo "===== EXTRACTED DIRECTORY SIZE ====="
+            du -sh "$WORK_DIR/extracted"
+
+            echo
+            echo "===== DISK AFTER EXTRACTION ====="
+            df -h /
+          } | tee -a "$REPORT"
+
+      - name: Inspect system image
+        run: |
+          set -euo pipefail
+
+          SYSTEM_IMG=$(find "$WORK_DIR/extracted" \
+            -type f -iname "system.img" -print -quit)
+
+          if [ -z "$SYSTEM_IMG" ]; then
+            echo "ERROR: system.img not found!"
+            exit 1
+          fi
+
+          {
+            echo
+            echo "===== SYSTEM IMAGE ====="
+            echo "Path: $SYSTEM_IMG"
+            ls -lh "$SYSTEM_IMG"
+            stat "$SYSTEM_IMG"
+            echo
+            echo "===== FILESYSTEM DETECTION ====="
+            file "$SYSTEM_IMG"
+            echo
+            echo "===== SYSTEM IMAGE SHA256 ====="
+            sha256sum "$SYSTEM_IMG"
+            echo
+            echo "===== FINAL DISK STATUS ====="
+            df -h /
+          } | tee -a "$REPORT"
+
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsi-inspection-report
+          path: gsi-report.txt
+          if-no-files-found: warn
+          retention-days: 7
