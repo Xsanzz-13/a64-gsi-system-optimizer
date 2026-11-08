@@ -98,30 +98,41 @@ jobs:
             df -h /
           } | tee -a "$REPORT"
 
-      - name: Inspect system image
+      - name: Inspect GSI image
         run: |
           set -euo pipefail
 
-          SYSTEM_IMG=$(find "$WORK_DIR/extracted" \
-            -type f -iname "system.img" -print -quit)
+          IMAGE_FILE=$(find "$WORK_DIR/extracted" \
+            -type f -iname "*.img" -print -quit)
 
-          if [ -z "$SYSTEM_IMG" ]; then
-            echo "ERROR: system.img not found!"
+          if [ -z "$IMAGE_FILE" ]; then
+            echo "ERROR: No IMG file found!"
             exit 1
           fi
 
           {
             echo
-            echo "===== SYSTEM IMAGE ====="
-            echo "Path: $SYSTEM_IMG"
-            ls -lh "$SYSTEM_IMG"
-            stat "$SYSTEM_IMG"
+            echo "===== GSI IMAGE ====="
+            echo "Path: $IMAGE_FILE"
+            ls -lh "$IMAGE_FILE"
+            stat "$IMAGE_FILE"
+
             echo
             echo "===== FILESYSTEM DETECTION ====="
-            file "$SYSTEM_IMG"
+            file -s "$IMAGE_FILE"
+
             echo
-            echo "===== SYSTEM IMAGE SHA256 ====="
-            sha256sum "$SYSTEM_IMG"
+            echo "===== BLKID SIGNATURE ====="
+            blkid -p "$IMAGE_FILE" || true
+
+            echo
+            echo "===== IMAGE HEADER ====="
+            od -Ax -tx1z -N64 "$IMAGE_FILE"
+
+            echo
+            echo "===== SHA256 ====="
+            sha256sum "$IMAGE_FILE"
+
             echo
             echo "===== FINAL DISK STATUS ====="
             df -h /
