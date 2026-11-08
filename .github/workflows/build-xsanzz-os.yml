@@ -101,7 +101,7 @@ jobs:
           mountpoint -q "$SYSTEM_ROOT"
           test -f "$SYSTEM_ROOT/system/build.prop"
           test -f "$SYSTEM_ROOT/system/product/etc/build.prop"
-          bash scripts/modify_system.sh "$SYSTEM_ROOT" "$GITHUB_WORKSPACE/config"
+          sudo bash scripts/modify_system.sh "$SYSTEM_ROOT" "$GITHUB_WORKSPACE/config"
 
           # Install as regular system apps (not privileged apps).
           sudo install -D -o root -g root -m 0644 "$BREVENT_APK" \
@@ -115,9 +115,9 @@ jobs:
           echo "Brevent and ZArchiver Pro embedded in /system/app (byte-for-byte verified)." | tee -a "$GITHUB_WORKSPACE/build-report.txt"
 
           echo "===== FINAL PROFILE VALIDATION =====" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
-          grep -E '^(ro.config.low_ram|ro.lmk.critical_upgrade|ro.lmk.upgrade_pressure|ro.lmk.downgrade_pressure|ro.lmk.kill_heaviest_task|ro.lmk.use_minfree_levels|ro.lmk.psi_complete_stall_ms|ro.lmk.swap_free_low_percentage|pm.dexopt.shared|ro.build.display.id)=' "$SYSTEM_ROOT/system/build.prop" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
-          grep -E '^(ro.build.display.id|ro.lineage.display.version)=' "$SYSTEM_ROOT/system/product/etc/build.prop" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
-          if grep -E 'ro\.gsi\.optimizer\.v2_test|persist\.gsi\.optimizer\.test' "$SYSTEM_ROOT/system/build.prop" "$SYSTEM_ROOT/system/product/etc/build.prop"; then
+          sudo grep -E '^(ro.config.low_ram|ro.lmk.critical_upgrade|ro.lmk.upgrade_pressure|ro.lmk.downgrade_pressure|ro.lmk.kill_heaviest_task|ro.lmk.use_minfree_levels|ro.lmk.psi_complete_stall_ms|ro.lmk.swap_free_low_percentage|pm.dexopt.shared|ro.build.display.id)=' "$SYSTEM_ROOT/system/build.prop" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+          sudo grep -E '^(ro.build.display.id|ro.lineage.display.version)=' "$SYSTEM_ROOT/system/product/etc/build.prop" | tee -a "$GITHUB_WORKSPACE/build-report.txt"
+          if sudo grep -E 'ro\.gsi\.optimizer\.v2_test|persist\.gsi\.optimizer\.test' "$SYSTEM_ROOT/system/build.prop" "$SYSTEM_ROOT/system/product/etc/build.prop"; then
             echo "ERROR: temporary test properties remain."
             exit 1
           fi
