@@ -205,18 +205,25 @@ jobs:
             "$GITHUB_WORKSPACE/XSANZZ-KSU-Tuning-$VERSION.zip" \
             > "$GITHUB_WORKSPACE/SHA256SUMS.txt"
 
+      - name: Pack XSANZZ OS with XZ
+        run: |
+          set -e
+          ARCHIVE="XSANZZ-OS-${{ inputs.build_version }}.tar.xz"
+          XZ_OPT="-9e -T0" tar -cJf "$ARCHIVE" \
+            "XSANZZ-OS-${{ inputs.build_version }}-a64-bvN.img" \
+            "XSANZZ-KSU-Tuning-${{ inputs.build_version }}.zip" \
+            INSTALL.txt GAPPS-STATUS.txt APPS-INFO.txt \
+            SHA256SUMS.txt build-report.txt
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          ls -lh "$ARCHIVE" "$ARCHIVE.sha256"
+
       - name: Upload XSANZZ OS build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: XSANZZ-OS-${{ inputs.build_version }}-first-test
           path: |
-            XSANZZ-OS-${{ inputs.build_version }}-a64-bvN.img
-            XSANZZ-KSU-Tuning-${{ inputs.build_version }}.zip
-            INSTALL.txt
-            GAPPS-STATUS.txt
-            APPS-INFO.txt
-            SHA256SUMS.txt
-            build-report.txt
+            XSANZZ-OS-${{ inputs.build_version }}.tar.xz
+            XSANZZ-OS-${{ inputs.build_version }}.tar.xz.sha256
           if-no-files-found: error
           compression-level: 9
           retention-days: 14
