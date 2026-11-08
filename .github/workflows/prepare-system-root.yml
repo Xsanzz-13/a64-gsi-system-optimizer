@@ -132,6 +132,69 @@ jobs:
 
           echo "Write test successful."
 
+          echo "===== EXPORTING ORIGINAL ROM CONFIG ====="
+
+          AUDIT_ROOT="$RUNNER_TEMP/gsi-optimizer/gsi-config-audit"
+          sudo mkdir -p "$AUDIT_ROOT/files"
+
+          # Salin semua property dan init script sebelum modifikasi.
+          while IFS= read -r -d '' src; do
+            rel="${src#"$SYSTEM_ROOT"/}"
+            dst="$AUDIT_ROOT/files/$rel"
+
+            sudo mkdir -p "$(dirname "$dst")"
+            sudo cp -p "$src" "$dst"
+          done < <(
+            sudo find "$SYSTEM_ROOT" -type f \
+              \( -name "*.prop" -o -name "*.rc" \) -print0
+          )
+
+          # Ambil konfigurasi permission, sysconfig, dan VINTF.
+          for part in system system_ext product vendor; do
+            for sub in permissions sysconfig vintf; do
+              src="$SYSTEM_ROOT/$part/etc/$sub"
+
+              if sudo test -d "$src"; then
+                sudo mkdir -p "$AUDIT_ROOT/files/$part/etc"
+                sudo cp -a "$src" "$AUDIT_ROOT/files/$part/etc/"
+              fi
+            done
+          done
+
+          # Inventaris aplikasi, overlay, property, dan init script.
+          {
+            echo "===== PROPERTY AND INIT FILES ====="
+            sudo find "$AUDIT_ROOT/files" -type f \
+              \( -name "*.prop" -o -name "*.rc" \) \
+              | sed "s#^$AUDIT_ROOT/files/##" | sort
+
+            echo
+            echo "===== SYSTEM APP INVENTORY ====="
+
+            while IFS= read -r -d '' base; do
+              rel="${base#"$SYSTEM_ROOT"/}"
+              sudo find "$base" -mindepth 1 -maxdepth 1 \
+                -type d -printf "$rel/%f\n"
+            done < <(
+              sudo find "$SYSTEM_ROOT" -type d \
+                \( -name app -o -name priv-app \) -print0
+            )
+
+            echo
+            echo "===== OVERLAY INVENTORY ====="
+            sudo find "$SYSTEM_ROOT" -type d -name overlay \
+              | sed "s#^$SYSTEM_ROOT/##" | sort
+          } | sudo tee "$AUDIT_ROOT/inventory.txt" >/dev/null
+
+          sudo chmod -R a+rX "$AUDIT_ROOT"
+
+          sudo tar -czf "$GITHUB_WORKSPACE/gsi-config-audit.tar.gz" \
+            -C "$AUDIT_ROOT" .
+
+          sudo chmod 644 "$GITHUB_WORKSPACE/gsi-config-audit.tar.gz"
+
+          ls -lh "$GITHUB_WORKSPACE/gsi-config-audit.tar.gz"
+
           echo "===== APPLYING MODIFICATION SCRIPT ====="
           sudo bash scripts/modify_system.sh \
             "$SYSTEM_ROOT" \
@@ -196,5 +259,6 @@ jobs:
             gsi-report.txt
             system-tree.txt
             extracted-images.txt
+            gsi-config-audit.tar.gz
           if-no-files-found: warn
           retention-days: 7
